@@ -15,6 +15,9 @@
  */
 package com.prowidesoftware.swift.cbpr.migration;
 
+import com.prowidesoftware.swift.model.mx.dic.AccountIdentification4Choice;
+import com.prowidesoftware.swift.model.mx.dic.CashAccount38;
+import com.prowidesoftware.swift.model.mx.dic.GenericAccountIdentification1;
 import com.prowidesoftware.swift.model.mx.dic.PostalAddress24;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -47,12 +50,21 @@ import org.apache.commons.lang3.StringUtils;
  * Unstructured name-and-address fields (Field 59 no-option / Field 50K) instead yield an address-line-only
  * {@code PstlAdr} that deliberately fails the CBPR+ hero rule {@code structured-address-min-town-country}.
  *
- * <p>This helper only <em>builds</em> addresses; it never classifies them and never weakens a rule. The
- * Structured / Hybrid / Unstructured classification is performed later by the validator's
- * {@code PostalAddressClassifier}. Every method is null-safe and never throws: {@code null}, empty, blank or
- * otherwise malformed input yields an empty (but non-{@code null}) {@link PostalAddress24} or a {@code null}
- * name, as documented per method. The returned {@link PostalAddress24} is always a brand-new object; no input
- * is ever mutated.
+ * <p><b>Accompanying account/party identifier.</b> Structured and unstructured MT name-and-address fields may be
+ * preceded by a leading account/party-identifier line of the form {@code /34x} (for example {@code /12345678}).
+ * Per the CBPR+ migration scope, this identifier is migrated <em>alongside</em> the party name and postal
+ * address. This helper therefore also exposes {@link #accountIdentifierFromLines(List)} (which returns the raw
+ * identifier so it is never lost) and {@link #accountFromLines(List)} (which projects that identifier onto a
+ * freshly built ISO 20022 {@link CashAccount38}). The identifier is still excluded from the name and from the
+ * postal address itself; the migrators attach the returned {@link CashAccount38} to the appropriate target
+ * account branch ({@code DbtrAcct} / {@code CdtrAcct}).
+ *
+ * <p>This helper only <em>builds</em> addresses and account identifiers; it never classifies addresses and
+ * never weakens a rule. The Structured / Hybrid / Unstructured classification is performed later by the
+ * validator's {@code PostalAddressClassifier}. Every method is null-safe and never throws: {@code null}, empty,
+ * blank or otherwise malformed input yields an empty (but non-{@code null}) {@link PostalAddress24}, a
+ * {@code null} name, or a {@code null} {@link CashAccount38}, as documented per method. The returned
+ * {@link PostalAddress24} and {@link CashAccount38} are always brand-new objects; no input is ever mutated.
  *
  * <p>This is a pure static utility class and cannot be instantiated.
  */
@@ -77,6 +89,14 @@ public final class AddressMigrationSupport {
      * field.
      */
     private static final String LINE_COUNTRY_TOWN = "3";
+
+    /**
+     * Shape of an IBAN as defined by ISO 13616: two alphabetic country characters, two numeric check digits and
+     * an 11-to-30 character alphanumeric BBAN (total length 15&ndash;34). This is a bounded structural check used
+     * only to decide whether a migrated account identifier is projected as {@code IBAN} rather than as a generic
+     * {@code Othr} identifier; it deliberately performs no check-digit (mod-97) verification.
+     */
+    private static final Pattern IBAN_PATTERN = Pattern.compile("[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}");
 
     private AddressMigrationSupport() {
         // Pure static utility; not instantiable.
@@ -167,7 +187,9 @@ public final class AddressMigrationSupport {
      * Builds an address-line-only {@link PostalAddress24} from an unstructured MT name-and-address field (Field
      * 59 no-option / Field 50K).
      *
-     * <p>A leading account/party identifier line (starting with {@code /}) is skipped; the first remaining
+     * <p>A leading account/party identifier line (starting with {@code /}) is skipped here because it is neither
+     * a name nor an address line; it is <em>not</em> discarded from the migration, however &mdash; the migrator
+     * projects it onto the target account branch via {@link #accountFromLines(List)}. The first remaining
      * non-blank line is the party name and is <em>not</em> added to the address (the migrator sets it as the
      * party {@code Nm} via {@link #nameFromLines(List)}); every subsequent non-blank line is appended as an
      * address line (any accidental {@code N/} prefix is stripped defensively).
@@ -206,6 +228,63 @@ public final class AddressMigrationSupport {
             }
         }
         return address;
+    }
+
+    /**
+     * Extracts the leading account/party identifier carried by an MT name-and-address field, that is, the
+     * content of the first line whose first non-whitespace character is {@code /} (for example the {@code 12345678}
+     * of a {@code /12345678} line).
+     *
+     * <p>Both the structured "F" fields (Field 50F / 59F) and the unstructured fields (Field 59 no-option /
+     * Field 50K) may carry such an identifier as their first line, ahead of the name-and-address content. This
+     * method returns that identifier so the migration never silently discards it; the numbered address lines
+     * ({@code 1/}, {@code 2/}, {@code 3/}&hellip;) are never mistaken for it because they carry a leading digit
+     * before the slash rather than a leading slash.
+     *
+     * @param lines the MT field lines as extracted by a migrator; may be {@code null} or empty
+     * @return the account/party identifier trimmed of the leading {@code /} and surrounding whitespace, or
+     *     {@code null} when no identifier line is present or it is blank; never throws
+     */
+    public static String accountIdentifierFromLines(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return null;
+        }
+        for (String line : lines) {
+            if (!isPartyIdentifierLine(line)) {
+                continue;
+            }
+            // Strip the leading '/' and return the remaining identifier (for example "/12345678" -> "12345678").
+            return StringUtils.trimToNull(line.trim().substring(1));
+        }
+        return null;
+    }
+
+    /**
+     * Builds an ISO 20022 {@link CashAccount38} from the leading account/party identifier of an MT
+     * name-and-address field, projecting the accompanying account identifier that the CBPR+ migration scope
+     * requires alongside the party name and postal address.
+     *
+     * <p>The identifier is resolved with {@link #accountIdentifierFromLines(List)}. When it is structurally an
+     * IBAN (per {@link #IBAN_PATTERN}) it is placed on {@code Id/IBAN}; otherwise it is placed on a generic
+     * {@code Id/Othr/Id} ({@link GenericAccountIdentification1}). No other {@link CashAccount38} facet (currency,
+     * name, type, proxy) is populated: only the account identifier is in migration scope, and none is invented.
+     *
+     * @param lines the MT field lines as extracted by a migrator; may be {@code null} or empty
+     * @return a new {@link CashAccount38} carrying only the account identifier, or {@code null} when the field
+     *     carries no account/party identifier line; never throws
+     */
+    public static CashAccount38 accountFromLines(List<String> lines) {
+        String identifier = accountIdentifierFromLines(lines);
+        if (identifier == null) {
+            return null;
+        }
+        AccountIdentification4Choice accountId = new AccountIdentification4Choice();
+        if (IBAN_PATTERN.matcher(identifier).matches()) {
+            accountId.setIBAN(identifier);
+        } else {
+            accountId.setOthr(new GenericAccountIdentification1().setId(identifier));
+        }
+        return new CashAccount38().setId(accountId);
     }
 
     /**

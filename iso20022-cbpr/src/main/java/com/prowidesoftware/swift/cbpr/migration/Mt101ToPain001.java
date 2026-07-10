@@ -24,6 +24,7 @@ import com.prowidesoftware.swift.model.field.Field59F;
 import com.prowidesoftware.swift.model.mt.AbstractMT;
 import com.prowidesoftware.swift.model.mt.mt1xx.MT101;
 import com.prowidesoftware.swift.model.mx.MxPain00100109;
+import com.prowidesoftware.swift.model.mx.dic.CashAccount38;
 import com.prowidesoftware.swift.model.mx.dic.CreditTransferTransaction34;
 import com.prowidesoftware.swift.model.mx.dic.CustomerCreditTransferInitiationV09;
 import com.prowidesoftware.swift.model.mx.dic.OrganisationIdentification29;
@@ -73,13 +74,15 @@ import java.util.regex.Pattern;
  * (no-option, unstructured) &rarr; {@link MT101#getField59A() Field 59A} (BIC only).</p>
  *
  * <p><strong>Address/party-scoped and partial by design.</strong> Only the ordering-customer and beneficiary
- * name and postal address are migrated (each mapped onto {@code PmtInf/Dbtr} and
- * {@code PmtInf/CdtTrfTxInf/Cdtr} respectively). Every other branch of the target message is intentionally left
- * {@code null}: the group header (including the initiating party), the payment method and payment type
- * information, all amounts, the debtor and creditor agents, requested execution dates, remittance information
- * and references are <strong>not</strong> mapped. The returned {@link MxPain00100109} is therefore a partial
- * message by design, and the accompanying test asserts specifically on the structured-address findings rather
- * than on overall validity.</p>
+ * identity (name and postal address, plus {@code Id/OrgId/AnyBIC} for the BIC-only options) and the
+ * accompanying account/party identifier are migrated: the parties map onto {@code PmtInf/Dbtr} and
+ * {@code PmtInf/CdtTrfTxInf/Cdtr}, and the leading {@code /...} account identifiers map onto
+ * {@code PmtInf/DbtrAcct} and {@code PmtInf/CdtTrfTxInf/CdtrAcct} respectively. Every other branch of the
+ * target message is intentionally left {@code null}: the group header (including the initiating party), the
+ * payment method and payment type information, all amounts, the debtor and creditor agents, requested execution
+ * dates, remittance information and references are <strong>not</strong> mapped. The returned
+ * {@link MxPain00100109} is therefore a partial message by design, and the accompanying test asserts
+ * specifically on the structured-address findings rather than on overall validity.</p>
  *
  * <p><strong>MT-API-bounded.</strong> The source MT is consumed <em>read-only</em> through the public Prowide
  * Core ({@code pw-swift-core}) MT API only ({@link AbstractMT#parse(String)}, the {@code MT101} Sequence B list
@@ -160,7 +163,8 @@ public class Mt101ToPain001 {
      *
      * <p>A single {@link PaymentInstruction30} is created carrying the migrated ordering customer as its debtor,
      * and a single {@link CreditTransferTransaction34} is created carrying the migrated beneficiary as its
-     * creditor. No group header, payment method, payment type information, amount, agent, date, remittance or
+     * creditor; the accompanying account/party identifiers are populated onto {@code DbtrAcct} / {@code CdtrAcct}
+     * when present. No group header, payment method, payment type information, amount, agent, date, remittance or
      * reference data is mapped &mdash; the returned message is partial by design.</p>
      *
      * @param mt the source MT101 message; must not be {@code null}
@@ -188,6 +192,18 @@ public class Mt101ToPain001 {
         // message; the debtor agent, amount and all other branches remain null.
         pmtInf.setDbtr(mapOrderingCustomer(mt));
         tx.setCdtr(mapBeneficiary(mt));
+
+        // Migrate the accompanying account/party identifier (the leading "/..." line of the ordering-customer /
+        // beneficiary field) onto DbtrAcct / CdtrAcct. Each account is set only when present, so a BIC-only or
+        // account-less option leaves the branch null (partial by design).
+        final CashAccount38 debtorAccount = mapOrderingCustomerAccount(mt);
+        if (debtorAccount != null) {
+            pmtInf.setDbtrAcct(debtorAccount);
+        }
+        final CashAccount38 creditorAccount = mapBeneficiaryAccount(mt);
+        if (creditorAccount != null) {
+            tx.setCdtrAcct(creditorAccount);
+        }
 
         // getCdtTrfTxInf() and getPmtInf() lazily initialise non-null, mutable lists on the generated model.
         pmtInf.getCdtTrfTxInf().add(tx);
@@ -283,6 +299,58 @@ public class Mt101ToPain001 {
 
         // Defensive: no supported beneficiary option present; leave the creditor minimal.
         return cdtr;
+    }
+
+    /**
+     * Resolves the ordering-customer account/party identifier from the MT101 Sequence B 50a option, inspecting
+     * Field 50F, then Field 50H, then Field 50G in the same priority as {@link #mapOrderingCustomer(MT101)}, and
+     * projects its leading {@code /...} identifier onto a {@link CashAccount38} via
+     * {@link AddressMigrationSupport#accountFromLines(List)}.
+     *
+     * @param mt the source MT101 message; never {@code null}
+     * @return the debtor {@link CashAccount38}, or {@code null} when no present option carries an account
+     *     identifier
+     */
+    private CashAccount38 mapOrderingCustomerAccount(final MT101 mt) {
+        final List<Field50F> field50F = mt.getField50F();
+        if (isPresent(field50F)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field50F.get(0).getValue()));
+        }
+        final List<Field50H> field50H = mt.getField50H();
+        if (isPresent(field50H)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field50H.get(0).getValue()));
+        }
+        final List<Field50G> field50G = mt.getField50G();
+        if (isPresent(field50G)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field50G.get(0).getValue()));
+        }
+        return null;
+    }
+
+    /**
+     * Resolves the beneficiary account/party identifier from the MT101 Sequence B 59a option, inspecting Field
+     * 59F, then Field 59, then Field 59A in the same priority as {@link #mapBeneficiary(MT101)}, and projects its
+     * leading {@code /...} identifier onto a {@link CashAccount38} via
+     * {@link AddressMigrationSupport#accountFromLines(List)}.
+     *
+     * @param mt the source MT101 message; never {@code null}
+     * @return the creditor {@link CashAccount38}, or {@code null} when no present option carries an account
+     *     identifier
+     */
+    private CashAccount38 mapBeneficiaryAccount(final MT101 mt) {
+        final List<Field59F> field59F = mt.getField59F();
+        if (isPresent(field59F)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field59F.get(0).getValue()));
+        }
+        final List<Field59> field59 = mt.getField59();
+        if (isPresent(field59)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field59.get(0).getValue()));
+        }
+        final List<Field59A> field59A = mt.getField59A();
+        if (isPresent(field59A)) {
+            return AddressMigrationSupport.accountFromLines(splitValue(field59A.get(0).getValue()));
+        }
+        return null;
     }
 
     /**
