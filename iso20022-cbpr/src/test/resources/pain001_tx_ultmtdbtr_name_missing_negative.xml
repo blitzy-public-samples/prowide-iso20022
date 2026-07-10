@@ -1,0 +1,81 @@
+<message>
+    <AppHdr xmlns='urn:iso:std:iso:20022:tech:xsd:head.001.001.01'
+            xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>
+        <Fr>
+            <FIId>
+                <FinInstnId>
+                    <BICFI>BANKDEFFXXX</BICFI>
+                </FinInstnId>
+            </FIId>
+        </Fr>
+        <To>
+            <FIId>
+                <FinInstnId>
+                    <BICFI>BANKGB22XXX</BICFI>
+                </FinInstnId>
+            </FIId>
+        </To>
+        <BizMsgIdr>PAIN0010001</BizMsgIdr>
+        <MsgDefIdr>pain.001.001.09</MsgDefIdr>
+        <CreDt>2026-11-16T10:00:00Z</CreDt>
+    </AppHdr>
+    <Document xmlns='urn:iso:std:iso:20022:tech:xsd:pain.001.001.09'
+              xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>
+        <CstmrCdtTrfInitn>
+            <GrpHdr>
+                <MsgId>PAIN-MSG-0001</MsgId>
+                <CreDtTm>2026-11-16T10:00:00</CreDtTm>
+                <NbOfTxs>1</NbOfTxs>
+                <CtrlSum>1000</CtrlSum>
+                <InitgPty>
+                    <Nm>Initiating Party Ltd</Nm>
+                </InitgPty>
+            </GrpHdr>
+            <PmtInf>
+                <PmtInfId>PMT-INF-0001</PmtInfId>
+                <PmtMtd>TRF</PmtMtd>
+                <ReqdExctnDt>
+                    <Dt>2026-11-16</Dt>
+                </ReqdExctnDt>
+                <Dbtr>
+                    <Nm>Debtor Company SA</Nm>
+                    <PstlAdr>
+                        <TwnNm>Madrid</TwnNm>
+                        <Ctry>ES</Ctry>
+                    </PstlAdr>
+                </Dbtr>
+                <DbtrAgt>
+                    <FinInstnId>
+                        <BICFI>BANKESMMXXX</BICFI>
+                    </FinInstnId>
+                </DbtrAgt>
+                <CdtTrfTxInf>
+                    <PmtId>
+                        <EndToEndId>E2E-0001</EndToEndId>
+                    </PmtId>
+                    <Amt>
+                        <InstdAmt Ccy='EUR'>1000</InstdAmt>
+                    </Amt>
+                    <UltmtDbtr>
+                        <PstlAdr>
+                            <TwnNm>Lisbon</TwnNm>
+                            <Ctry>PT</Ctry>
+                        </PstlAdr>
+                    </UltmtDbtr>
+                    <CdtrAgt>
+                        <FinInstnId>
+                            <BICFI>BANKFRPPXXX</BICFI>
+                        </FinInstnId>
+                    </CdtrAgt>
+                    <Cdtr>
+                        <Nm>Creditor Enterprise SARL</Nm>
+                        <PstlAdr>
+                            <TwnNm>Paris</TwnNm>
+                            <Ctry>FR</Ctry>
+                        </PstlAdr>
+                    </Cdtr>
+                </CdtTrfTxInf>
+            </PmtInf>
+        </CstmrCdtTrfInitn>
+    </Document>
+</message>
