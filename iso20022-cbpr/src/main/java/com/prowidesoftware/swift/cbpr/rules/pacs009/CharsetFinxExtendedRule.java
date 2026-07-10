@@ -58,17 +58,24 @@ import java.util.List;
  * <h2>Scope of inspection</h2>
  *
  * <p>The rule scans the same financial-institution party and agent occurrences as the pacs.009
- * structured-address rule, and for each one inspects the textual {@code Nm} plus the postal-address
- * free-text values ({@code TwnNm}, {@code Ctry} and every {@code AdrLine}) rather than their structural
- * completeness:
+ * structured-address rule, and for each one inspects the textual {@code Nm} plus every free-text
+ * component of the postal address rather than their structural completeness:
  *
  * <ul>
  *   <li>group-header agents &mdash; {@code InstgAgt}, {@code InstdAgt};
  *   <li>per credit-transfer-transaction financial-institution parties &mdash; {@code UltmtDbtr},
  *       {@code Dbtr}, {@code Cdtr}, {@code UltmtCdtr};
  *   <li>per credit-transfer-transaction agents &mdash; {@code InstgAgt}, {@code InstdAgt},
- *       {@code DbtrAgt}, {@code CdtrAgt}, {@code IntrmyAgt1}, {@code IntrmyAgt2}, {@code IntrmyAgt3}.
+ *       {@code DbtrAgt}, {@code CdtrAgt}, {@code IntrmyAgt1}, {@code IntrmyAgt2}, {@code IntrmyAgt3},
+ *       {@code PrvsInstgAgt1}, {@code PrvsInstgAgt2} and {@code PrvsInstgAgt3}.
  * </ul>
+ *
+ * <p>For every occurrence carrying a {@link PostalAddress24}, the rule sweeps the <strong>complete</strong>
+ * set of address free-text components &mdash; matching the pacs.008 charset rule &mdash; namely
+ * {@code Dept}, {@code SubDept}, {@code StrtNm}, {@code BldgNb}, {@code BldgNm}, {@code Flr},
+ * {@code PstBx}, {@code Room}, {@code PstCd}, {@code TwnNm}, {@code TwnLctnNm}, {@code DstrctNm},
+ * {@code CtrySubDvsn}, {@code Ctry} and every {@code AdrLine} entry, so that a disallowed character in
+ * any address field is detected rather than only the town/country/address-line subset.
  *
  * <h2>Resilience contract</h2>
  *
@@ -154,6 +161,11 @@ public class CharsetFinxExtendedRule implements CbprRule<MxPacs00900108> {
                 evaluateFi(tx.getIntrmyAgt1(), base + "/IntrmyAgt1", findings);
                 evaluateFi(tx.getIntrmyAgt2(), base + "/IntrmyAgt2", findings);
                 evaluateFi(tx.getIntrmyAgt3(), base + "/IntrmyAgt3", findings);
+                // Previous instructing agents are financial-institution agents too; their Name and
+                // postal-address free-text must be swept for disallowed characters like every other agent.
+                evaluateFi(tx.getPrvsInstgAgt1(), base + "/PrvsInstgAgt1", findings);
+                evaluateFi(tx.getPrvsInstgAgt2(), base + "/PrvsInstgAgt2", findings);
+                evaluateFi(tx.getPrvsInstgAgt3(), base + "/PrvsInstgAgt3", findings);
             }
         }
 
@@ -165,8 +177,8 @@ public class CharsetFinxExtendedRule implements CbprRule<MxPacs00900108> {
      * address free-text values against the FIN-X extended character set.
      *
      * <p>A {@code null} party, or a party without a {@code FinInstnId}, contributes no findings. When a
-     * postal address is present, its {@code TwnNm}, {@code Ctry} and each {@code AdrLine} entry are
-     * checked in addition to the party {@code Nm}.
+     * postal address is present, every free-text component of that address is checked (delegated to
+     * {@link #checkAddress}) in addition to the party {@code Nm}.
      *
      * @param fiParty the financial-institution identification to inspect; may be {@code null}
      * @param path the element path prefix identifying this occurrence (for example
@@ -186,15 +198,50 @@ public class CharsetFinxExtendedRule implements CbprRule<MxPacs00900108> {
         // Party name.
         checkString(id.getNm(), path + "/FinInstnId/Nm", findings);
 
-        // Postal-address free-text values.
+        // Postal-address free-text values (complete component sweep).
         PostalAddress24 addr = id.getPstlAdr();
         if (addr != null) {
-            checkString(addr.getTwnNm(), path + "/FinInstnId/PstlAdr/TwnNm", findings);
-            checkString(addr.getCtry(), path + "/FinInstnId/PstlAdr/Ctry", findings);
-            List<String> adrLines = addr.getAdrLine();
-            for (int j = 0; j < adrLines.size(); j++) {
-                checkString(adrLines.get(j), path + "/FinInstnId/PstlAdr/AdrLine[" + j + "]", findings);
-            }
+            checkAddress(addr, path + "/FinInstnId/PstlAdr", findings);
+        }
+    }
+
+    /**
+     * Sweeps every free-text component of a {@link PostalAddress24}, testing each present value against
+     * the FIN-X extended character set.
+     *
+     * <p>All structured address string sub-elements ({@code Dept}, {@code SubDept}, {@code StrtNm},
+     * {@code BldgNb}, {@code BldgNm}, {@code Flr}, {@code PstBx}, {@code Room}, {@code PstCd},
+     * {@code TwnNm}, {@code TwnLctnNm}, {@code DstrctNm}, {@code CtrySubDvsn}, {@code Ctry}) plus every
+     * {@code AdrLine} entry are inspected, mirroring the pacs.008 charset rule so a disallowed character
+     * anywhere in the address is reported. {@code getAdrLine()} is a lazily-initialised, never-{@code
+     * null} list and is iterated directly.
+     *
+     * @param addr the postal address to inspect; ignored when {@code null}
+     * @param path the element path prefix for this address (for example
+     *     {@code FICdtTrf/CdtTrfTxInf[0]/Dbtr/FinInstnId/PstlAdr})
+     * @param findings the accumulator to which any findings are added
+     */
+    private void checkAddress(PostalAddress24 addr, String path, List<Finding> findings) {
+        if (addr == null) {
+            return;
+        }
+        checkString(addr.getDept(), path + "/Dept", findings);
+        checkString(addr.getSubDept(), path + "/SubDept", findings);
+        checkString(addr.getStrtNm(), path + "/StrtNm", findings);
+        checkString(addr.getBldgNb(), path + "/BldgNb", findings);
+        checkString(addr.getBldgNm(), path + "/BldgNm", findings);
+        checkString(addr.getFlr(), path + "/Flr", findings);
+        checkString(addr.getPstBx(), path + "/PstBx", findings);
+        checkString(addr.getRoom(), path + "/Room", findings);
+        checkString(addr.getPstCd(), path + "/PstCd", findings);
+        checkString(addr.getTwnNm(), path + "/TwnNm", findings);
+        checkString(addr.getTwnLctnNm(), path + "/TwnLctnNm", findings);
+        checkString(addr.getDstrctNm(), path + "/DstrctNm", findings);
+        checkString(addr.getCtrySubDvsn(), path + "/CtrySubDvsn", findings);
+        checkString(addr.getCtry(), path + "/Ctry", findings);
+        List<String> adrLines = addr.getAdrLine();
+        for (int j = 0; j < adrLines.size(); j++) {
+            checkString(adrLines.get(j), path + "/AdrLine[" + j + "]", findings);
         }
     }
 

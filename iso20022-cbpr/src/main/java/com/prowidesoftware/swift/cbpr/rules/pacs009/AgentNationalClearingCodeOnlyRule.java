@@ -51,11 +51,12 @@ import org.apache.commons.lang3.StringUtils;
  * {@link Severity#WARNING} finding to record that the permission is in effect.
  *
  * <p>Because the finding is a {@code WARNING}, it does <em>not</em> flip
- * {@code ValidationResult.valid}: a message that carries only warnings remains valid. When the
- * permissive condition does not hold &mdash; the agents span more than one country, no agent uses
- * clearing-code-only identification, or a common country cannot be determined &mdash; the rule
- * reports nothing and returns an empty list. This rule never produces an {@code ERROR} and never
- * fails a message.
+ * {@code ValidationResult.valid}: a message that carries only warnings remains valid. The claim that
+ * "all agents share one country" is only made when the evidence fully supports it: <strong>every</strong>
+ * collected agent must resolve to a country. When the permissive condition does not hold &mdash; the
+ * agents span more than one country, <em>any</em> collected agent's country cannot be determined, or no
+ * agent uses clearing-code-only identification &mdash; the rule reports nothing and returns an empty
+ * list. This rule never produces an {@code ERROR} and never fails a message.
  *
  * <h2>Agent scope and country derivation</h2>
  *
@@ -117,10 +118,11 @@ public class AgentNationalClearingCodeOnlyRule implements CbprRule<MxPacs0090010
      * pacs.009.001.08 message.
      *
      * <p>Collects every agent occurrence, derives the set of countries they resolve to and detects
-     * whether any agent is identified by a national clearing code only. When (and only when) all
-     * resolvable agents share exactly one country and at least one agent is clearing-code-only, a
-     * single informational {@link Severity#WARNING} finding is returned; in every other case the
-     * result is empty. The method never throws and never returns {@code null}.
+     * whether any agent is identified by a national clearing code only. When (and only when) every
+     * collected agent resolves to a country, all of those countries are the same single country and at
+     * least one agent is clearing-code-only, a single informational {@link Severity#WARNING} finding is
+     * returned; in every other case &mdash; including when any agent's country cannot be determined
+     * &mdash; the result is empty. The method never throws and never returns {@code null}.
      *
      * @param message the parsed pacs.009.001.08 message; may be {@code null} or partial
      * @return a list containing a single {@code WARNING} finding when the CBPR+ clearing-code-only
@@ -143,16 +145,27 @@ public class AgentNationalClearingCodeOnlyRule implements CbprRule<MxPacs0090010
         }
 
         Set<String> countries = new HashSet<>();
+        boolean allAgentsHaveCountry = true;
         for (BranchAndFinancialInstitutionIdentification6 agent : agents) {
             String country = countryOf(agent);
-            if (country != null) {
+            if (country == null) {
+                // An agent whose country cannot be determined (no well-formed BICFI and no postal-address
+                // country) means the message does not provide enough evidence to assert that *all* agents
+                // share a single country; the permissive allowance therefore cannot be confirmed.
+                allAgentsHaveCountry = false;
+            } else {
                 countries.add(country);
             }
         }
 
         boolean anyClearingOnly = agents.stream().anyMatch(this::isClearingCodeOnly);
 
-        if (countries.size() == 1 && anyClearingOnly) {
+        // Emit the informational warning only when the CBPR+ permission is unambiguously in effect:
+        // every present agent resolves to a country, all of those countries are the same single country,
+        // and at least one agent is identified by a national clearing code only. If any collected agent's
+        // country cannot be determined, no claim is made and the rule returns nothing (agents is
+        // guaranteed non-empty by the early return above).
+        if (allAgentsHaveCountry && countries.size() == 1 && anyClearingOnly) {
             String country = countries.iterator().next();
             findings.add(new Finding(
                     RULE_ID,

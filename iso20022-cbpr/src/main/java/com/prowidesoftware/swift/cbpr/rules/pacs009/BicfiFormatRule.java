@@ -62,7 +62,8 @@ import org.apache.commons.lang3.StringUtils;
  *   <li>for each transaction in {@code FICdtTrf/CdtTrfTxInf}, the FI parties
  *       ({@code UltmtDbtr}, {@code Dbtr}, {@code Cdtr}, {@code UltmtCdtr}) and the agents
  *       ({@code InstgAgt}, {@code InstdAgt}, {@code DbtrAgt}, {@code CdtrAgt},
- *       {@code IntrmyAgt1}, {@code IntrmyAgt2}, {@code IntrmyAgt3}).
+ *       {@code IntrmyAgt1}, {@code IntrmyAgt2}, {@code IntrmyAgt3},
+ *       {@code PrvsInstgAgt1}, {@code PrvsInstgAgt2}, {@code PrvsInstgAgt3}).
  * </ul>
  *
  * <p>Each occurrence is reached through typed getter chains (no {@code MxNode} navigation and no
@@ -172,6 +173,11 @@ public class BicfiFormatRule implements CbprRule<MxPacs00900108> {
                 evaluateFi(tx.getIntrmyAgt1(), base + "/IntrmyAgt1", findings);
                 evaluateFi(tx.getIntrmyAgt2(), base + "/IntrmyAgt2", findings);
                 evaluateFi(tx.getIntrmyAgt3(), base + "/IntrmyAgt3", findings);
+                // Previous instructing agents also carry a FinInstnId/BICFI that, when present, must be
+                // a well-formed ISO 9362 code; include them so a malformed BICFI here is not missed.
+                evaluateFi(tx.getPrvsInstgAgt1(), base + "/PrvsInstgAgt1", findings);
+                evaluateFi(tx.getPrvsInstgAgt2(), base + "/PrvsInstgAgt2", findings);
+                evaluateFi(tx.getPrvsInstgAgt3(), base + "/PrvsInstgAgt3", findings);
             }
         }
 

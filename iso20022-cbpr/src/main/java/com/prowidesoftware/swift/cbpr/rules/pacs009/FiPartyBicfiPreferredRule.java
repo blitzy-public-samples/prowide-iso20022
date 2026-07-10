@@ -81,7 +81,7 @@ import org.apache.commons.lang3.StringUtils;
  * plus every transaction in {@link FinancialInstitutionCreditTransferV08#getCdtTrfTxInf()}
  * ({@link CreditTransferTransaction36}) with its FI parties ({@code UltmtDbtr}, {@code Dbtr},
  * {@code Cdtr}, {@code UltmtCdtr}) and agents ({@code InstgAgt}, {@code InstdAgt}, {@code DbtrAgt},
- * {@code CdtrAgt}, {@code IntrmyAgt1..3}).
+ * {@code CdtrAgt}, {@code IntrmyAgt1..3}, {@code PrvsInstgAgt1..3}).
  *
  * <h2>Resilience</h2>
  *
@@ -151,32 +151,38 @@ public final class FiPartyBicfiPreferredRule implements CbprRule<MxPacs00900108>
             evaluateFi(grpHdr.getInstdAgt(), ROOT + "/GrpHdr/InstdAgt", findings);
         }
 
-        // Per-transaction financial-institution parties and agents. The list is lazily initialised by
-        // the generated model (never null), but it is still guarded defensively.
+        // Per-transaction financial-institution parties and agents. A zero-based transaction index is
+        // used in every elementPath, consistent with the other pacs.009 rule classes, so cross-rule
+        // diagnostics and test assertions line up on identical paths.
         final List<CreditTransferTransaction36> transactions = fiCdtTrf.getCdtTrfTxInf();
         if (transactions != null) {
-            int index = 1;
-            for (final CreditTransferTransaction36 tx : transactions) {
-                if (tx != null) {
-                    final String txPath = ROOT + "/CdtTrfTxInf[" + index + "]";
-
-                    // FI parties: in pacs.009 the debtor/creditor and their ultimate counterparts are
-                    // themselves financial institutions.
-                    evaluateFi(tx.getUltmtDbtr(), txPath + "/UltmtDbtr", findings);
-                    evaluateFi(tx.getDbtr(), txPath + "/Dbtr", findings);
-                    evaluateFi(tx.getCdtr(), txPath + "/Cdtr", findings);
-                    evaluateFi(tx.getUltmtCdtr(), txPath + "/UltmtCdtr", findings);
-
-                    // Agents on the settlement chain.
-                    evaluateFi(tx.getInstgAgt(), txPath + "/InstgAgt", findings);
-                    evaluateFi(tx.getInstdAgt(), txPath + "/InstdAgt", findings);
-                    evaluateFi(tx.getDbtrAgt(), txPath + "/DbtrAgt", findings);
-                    evaluateFi(tx.getCdtrAgt(), txPath + "/CdtrAgt", findings);
-                    evaluateFi(tx.getIntrmyAgt1(), txPath + "/IntrmyAgt1", findings);
-                    evaluateFi(tx.getIntrmyAgt2(), txPath + "/IntrmyAgt2", findings);
-                    evaluateFi(tx.getIntrmyAgt3(), txPath + "/IntrmyAgt3", findings);
+            for (int i = 0; i < transactions.size(); i++) {
+                final CreditTransferTransaction36 tx = transactions.get(i);
+                if (tx == null) {
+                    continue;
                 }
-                index++;
+                final String txPath = ROOT + "/CdtTrfTxInf[" + i + "]";
+
+                // FI parties: in pacs.009 the debtor/creditor and their ultimate counterparts are
+                // themselves financial institutions.
+                evaluateFi(tx.getUltmtDbtr(), txPath + "/UltmtDbtr", findings);
+                evaluateFi(tx.getDbtr(), txPath + "/Dbtr", findings);
+                evaluateFi(tx.getCdtr(), txPath + "/Cdtr", findings);
+                evaluateFi(tx.getUltmtCdtr(), txPath + "/UltmtCdtr", findings);
+
+                // Agents on the settlement chain.
+                evaluateFi(tx.getInstgAgt(), txPath + "/InstgAgt", findings);
+                evaluateFi(tx.getInstdAgt(), txPath + "/InstdAgt", findings);
+                evaluateFi(tx.getDbtrAgt(), txPath + "/DbtrAgt", findings);
+                evaluateFi(tx.getCdtrAgt(), txPath + "/CdtrAgt", findings);
+                evaluateFi(tx.getIntrmyAgt1(), txPath + "/IntrmyAgt1", findings);
+                evaluateFi(tx.getIntrmyAgt2(), txPath + "/IntrmyAgt2", findings);
+                evaluateFi(tx.getIntrmyAgt3(), txPath + "/IntrmyAgt3", findings);
+                // Previous instructing agents are financial institutions too and are subject to the
+                // same BICFI-preferred identification expectation as every other FI occurrence.
+                evaluateFi(tx.getPrvsInstgAgt1(), txPath + "/PrvsInstgAgt1", findings);
+                evaluateFi(tx.getPrvsInstgAgt2(), txPath + "/PrvsInstgAgt2", findings);
+                evaluateFi(tx.getPrvsInstgAgt3(), txPath + "/PrvsInstgAgt3", findings);
             }
         }
 
