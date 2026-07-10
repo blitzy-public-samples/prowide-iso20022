@@ -49,14 +49,21 @@ import org.apache.commons.lang3.StringUtils;
  *   <li>{@code Dbtr} and {@code UltmtDbtr} &mdash; the debtor and ultimate debtor, carried per
  *       payment instruction at the {@code PaymentInformation} level
  *       ({@link PaymentInstruction30#getDbtr()} and {@link PaymentInstruction30#getUltmtDbtr()});
- *   <li>{@code Cdtr} and {@code UltmtCdtr} &mdash; the creditor and ultimate creditor, carried per
- *       transaction ({@link CreditTransferTransaction34#getCdtr()} and
+ *   <li>{@code UltmtDbtr}, {@code Cdtr} and {@code UltmtCdtr} &mdash; the transaction-level ultimate
+ *       debtor, creditor and ultimate creditor, carried per transaction
+ *       ({@link CreditTransferTransaction34#getUltmtDbtr()},
+ *       {@link CreditTransferTransaction34#getCdtr()} and
  *       {@link CreditTransferTransaction34#getUltmtCdtr()}).
  * </ul>
  *
- * <p>Consistent with the structured-address rule's scoping, {@code UltmtDbtr} is evaluated only at the
- * {@code PaymentInformation} level and is deliberately <em>not</em> additionally inspected at
- * transaction level.
+ * <p>The authoritative CBPR+ inventory scopes this rule to {@code Debtor}, {@code Creditor},
+ * {@code UltmtDbtr}, {@code UltmtCdtr} and {@code InitgPty} without confining {@code UltmtDbtr} to a
+ * single structural level. Because the generated pain.001 model carries an ultimate debtor at
+ * <em>both</em> the {@code PaymentInformation} level ({@link PaymentInstruction30#getUltmtDbtr()}) and
+ * the transaction level ({@link CreditTransferTransaction34#getUltmtDbtr()}), this rule inspects
+ * {@code UltmtDbtr} at both. That is intentionally broader than the narrower
+ * {@code StructuredAddressRule}, whose inventory entry explicitly confines the ultimate debtor to the
+ * {@code PaymentInformation} level.
  *
  * <p>The trigger is strictly the <em>presence of the postal-address object</em>: a party postal
  * address is considered present when {@link PartyIdentification135#getPstlAdr()} is non-{@code null}.
@@ -106,10 +113,11 @@ public class PartyNameWhenAddressPresentRule implements CbprRule<MxPain00100109>
      * <p>Inspects the initiating party at group-header level, then walks every
      * {@link PaymentInstruction30} in {@code CstmrCdtTrfInitn/PmtInf} to inspect its {@code Dbtr} and
      * {@code UltmtDbtr}, and every {@link CreditTransferTransaction34} in each instruction's
-     * {@code CdtTrfTxInf} to inspect its {@code Cdtr} and {@code UltmtCdtr}. A {@link Finding} is
-     * emitted for every party that carries a postal address but no (non-blank) name. Every branch is
-     * null-guarded, so the method returns a (possibly empty) list and never throws &mdash; even for a
-     * {@code null} message or a message whose credit-transfer-initiation container is absent.
+     * {@code CdtTrfTxInf} to inspect its {@code UltmtDbtr}, {@code Cdtr} and {@code UltmtCdtr}. A
+     * {@link Finding} is emitted for every party that carries a postal address but no (non-blank)
+     * name. Every branch is null-guarded, so the method returns a (possibly empty) list and never
+     * throws &mdash; even for a {@code null} message or a message whose credit-transfer-initiation
+     * container is absent.
      *
      * @param message the parsed pain.001.001.09 message to validate; may be {@code null} or partial
      * @return the list of findings; empty when the message complies with this rule, never {@code null}
@@ -146,6 +154,7 @@ public class PartyNameWhenAddressPresentRule implements CbprRule<MxPain00100109>
                     continue;
                 }
                 String txPath = piPath + "/CdtTrfTxInf[" + j + "]";
+                checkParty(tx.getUltmtDbtr(), txPath + "/UltmtDbtr", findings);
                 checkParty(tx.getCdtr(), txPath + "/Cdtr", findings);
                 checkParty(tx.getUltmtCdtr(), txPath + "/UltmtCdtr", findings);
             }

@@ -94,7 +94,10 @@ public class CbprValidator {
     /**
      * Logger used only to record, at {@link Level#WARNING}, the (unexpected) event of a rule throwing
      * a {@link RuntimeException}. Consistent with the repository convention of using
-     * {@code java.util.logging}. Logging never alters the never-throw contract.
+     * {@code java.util.logging}. Only a sanitized diagnostic (the rule class name and the exception's
+     * simple name) is logged &mdash; never the throwable itself &mdash; so that validation of untrusted
+     * message content cannot emit a stack trace or other internal rule/parser detail. Logging never
+     * alters the never-throw contract.
      */
     private static final Logger log = Logger.getLogger(CbprValidator.class.getName());
 
@@ -142,11 +145,12 @@ public class CbprValidator {
      * the accumulator, guaranteeing the never-throw contract.
      *
      * <p>Each rule invocation is wrapped individually: a {@link RuntimeException} escaping any single
-     * rule is caught, logged at {@link Level#WARNING} and swallowed, so it neither propagates out of
-     * {@link #validate(AbstractMX)} nor prevents the remaining rules from running. This is a
-     * safety net layered on top of the rules' own defensive coding, ensuring findings are collected
-     * from every rule even in the presence of a rule defect. A {@code null} list returned by a rule
-     * is tolerated and contributes no findings.
+     * rule is caught, recorded at {@link Level#WARNING} as a sanitized diagnostic (the rule class name
+     * and the exception's simple name only, never the throwable or its stack trace) and swallowed, so
+     * it neither propagates out of {@link #validate(AbstractMX)} nor prevents the remaining rules from
+     * running. This is a safety net layered on top of the rules' own defensive coding, ensuring
+     * findings are collected from every rule even in the presence of a rule defect. A {@code null} list
+     * returned by a rule is tolerated and contributes no findings.
      *
      * @param <T> the concrete {@link AbstractMX} message subtype the rules are bound to
      * @param rules the ordered rule set to execute; never {@code null}
@@ -161,14 +165,18 @@ public class CbprValidator {
                     acc.addAll(ruleFindings);
                 }
             } catch (RuntimeException ex) {
-                // Never propagate: the validator's contract is to never throw. Log the unexpected
-                // rule failure so it is diagnosable, then continue with the remaining rules so that
-                // all findings are still collected.
+                // Never propagate: the validator's contract is to never throw. Record only a
+                // sanitized diagnostic (the rule class name and the exception's simple name) so the
+                // unexpected failure remains traceable, then continue with the remaining rules so that
+                // all findings are still collected. The throwable is deliberately NOT passed to the
+                // logger: validation runs over untrusted message content, so no stack trace or other
+                // internal rule/parser detail must be emitted. The message supplier closes over the two
+                // extracted strings only, never over the throwable itself.
+                final String ruleClassName = rule.getClass().getName();
+                final String exceptionName = ex.getClass().getSimpleName();
                 log.log(
                         Level.WARNING,
-                        ex,
-                        () -> "CBPR+ rule " + rule.getClass().getName() + " threw "
-                                + ex.getClass().getSimpleName()
+                        () -> "CBPR+ rule " + ruleClassName + " threw " + exceptionName
                                 + " and was skipped; validation continues per the never-throw contract");
             }
         }

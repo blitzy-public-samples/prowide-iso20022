@@ -47,24 +47,28 @@ import java.util.List;
  *
  * <h2>Fields inspected</h2>
  *
- * <p>The rule inspects the same five party roles used by the other party-oriented pain.001 rules
- * ({@code StructuredAddressRule} / {@code PartyNameWhenAddressPresentRule}), namely:
+ * <p>The rule inspects the pain.001 party roles at their canonical locations, matching the party scope of
+ * {@code PartyNameWhenAddressPresentRule}, namely:
  *
  * <ul>
  *   <li><strong>{@code InitgPty}</strong> &mdash; the group-header initiating party
  *       ({@code CstmrCdtTrfInitn/GrpHdr/InitgPty});
  *   <li><strong>{@code Dbtr}</strong> and <strong>{@code UltmtDbtr}</strong> &mdash; the debtor and ultimate
  *       debtor at PaymentInformation level ({@code CstmrCdtTrfInitn/PmtInf[i]});
- *   <li><strong>{@code Cdtr}</strong> and <strong>{@code UltmtCdtr}</strong> &mdash; the creditor and ultimate
- *       creditor at transaction level ({@code CstmrCdtTrfInitn/PmtInf[i]/CdtTrfTxInf[j]}).
+ *   <li><strong>{@code UltmtDbtr}</strong>, <strong>{@code Cdtr}</strong> and
+ *       <strong>{@code UltmtCdtr}</strong> &mdash; the transaction-level ultimate debtor, creditor and
+ *       ultimate creditor ({@code CstmrCdtTrfInitn/PmtInf[i]/CdtTrfTxInf[j]}).
  * </ul>
  *
- * <p>For each present party the rule tests the party {@code Nm} and, when a {@code PstlAdr} is present, its
- * free-text address components {@code TwnNm} and every {@code AdrLine} entry. Checking {@code Nm},
- * {@code TwnNm} and the {@code AdrLine} entries is the primary, sufficient scope for this rule application:
- * agent-name charset checking is intentionally <em>out of primary scope</em> (documented as optional in the
- * inventory) and is deliberately <strong>not</strong> performed here, so as never to strengthen the rule
- * beyond the authoritative CBPR+ inventory.
+ * <p>For each present party the rule tests the party {@code Nm} and, when a {@code PstlAdr} is present,
+ * <em>every</em> free-text component of that address &mdash; the structured sub-elements {@code Dept},
+ * {@code SubDept}, {@code StrtNm}, {@code BldgNb}, {@code BldgNm}, {@code Flr}, {@code PstBx}, {@code Room},
+ * {@code PstCd}, {@code TwnNm}, {@code TwnLctnNm}, {@code DstrctNm}, {@code CtrySubDvsn} and {@code Ctry},
+ * plus every {@code AdrLine} entry. This full address-component sweep matches the sibling pacs.008 /
+ * pacs.009 charset rules, so pain.001 does not <em>weaken</em> the rule relative to the authoritative CBPR+
+ * inventory. Agent-name charset checking is intentionally <em>out of primary scope</em> (documented as
+ * optional in the inventory) and is deliberately <strong>not</strong> performed here, so as never to
+ * strengthen the rule beyond the authoritative CBPR+ inventory.
  *
  * <h2>Design notes</h2>
  *
@@ -112,10 +116,10 @@ public final class CharsetFinxExtendedRule implements CbprRule<MxPain00100109> {
      * pain.001.001.09 message.
      *
      * <p>Walks the initiating party, the debtor/ultimate-debtor of every {@code PmtInf}, and the
-     * creditor/ultimate-creditor of every {@code CdtTrfTxInf}, validating each party's free-text {@code Nm}
-     * and postal-address components ({@code TwnNm} and each {@code AdrLine}) against the FIN-X extended
-     * character set. A {@link Finding} of severity {@link Severity#ERROR} is added for every value that
-     * contains a character outside that set.
+     * ultimate-debtor/creditor/ultimate-creditor of every {@code CdtTrfTxInf}, validating each party's
+     * free-text {@code Nm} and every postal-address component (all structured sub-elements plus each
+     * {@code AdrLine}) against the FIN-X extended character set. A {@link Finding} of severity
+     * {@link Severity#ERROR} is added for every value that contains a character outside that set.
      *
      * <p>The method never throws and never returns {@code null}: an empty list means the message complies,
      * while every element of a non-empty list describes a distinct offending value. A {@code null} message or
@@ -160,6 +164,7 @@ public final class CharsetFinxExtendedRule implements CbprRule<MxPain00100109> {
                     continue;
                 }
                 String txPath = piPath + "/CdtTrfTxInf[" + j + "]";
+                checkParty(tx.getUltmtDbtr(), txPath + "/UltmtDbtr", findings);
                 checkParty(tx.getCdtr(), txPath + "/Cdtr", findings);
                 checkParty(tx.getUltmtCdtr(), txPath + "/UltmtCdtr", findings);
             }
@@ -169,7 +174,8 @@ public final class CharsetFinxExtendedRule implements CbprRule<MxPain00100109> {
 
     /**
      * Inspects a single party's free-text surfaces: its {@code Nm} and, when a {@code PstlAdr} is present,
-     * its {@code TwnNm} and every {@code AdrLine} entry.
+     * every free-text component of that postal address (delegated to
+     * {@link #checkAddress(PostalAddress24, String, List)}).
      *
      * <p>A {@code null} party contributes no findings. Each candidate string is passed through
      * {@link #checkText(String, String, List)}, which delegates to {@link FinXCharset#isValidExtended(String)};
@@ -187,11 +193,53 @@ public final class CharsetFinxExtendedRule implements CbprRule<MxPain00100109> {
         checkText(party.getNm(), partyPath + "/Nm", findings);
         PostalAddress24 addr = party.getPstlAdr();
         if (addr != null) {
-            checkText(addr.getTwnNm(), partyPath + "/PstlAdr/TwnNm", findings);
-            List<String> adrLines = addr.getAdrLine(); // lazy, never null (entries may be null)
-            for (int k = 0; k < adrLines.size(); k++) {
-                checkText(adrLines.get(k), partyPath + "/PstlAdr/AdrLine[" + k + "]", findings);
-            }
+            checkAddress(addr, partyPath + "/PstlAdr", findings);
+        }
+    }
+
+    /**
+     * Sweeps every free-text component of a {@link PostalAddress24}: each structured string sub-element
+     * ({@code Dept}, {@code SubDept}, {@code StrtNm}, {@code BldgNb}, {@code BldgNm}, {@code Flr},
+     * {@code PstBx}, {@code Room}, {@code PstCd}, {@code TwnNm}, {@code TwnLctnNm}, {@code DstrctNm},
+     * {@code CtrySubDvsn} and {@code Ctry}) and every entry of the {@code AdrLine} list, validating each
+     * value against the FIN-X extended character set.
+     *
+     * <p>The full structured-component sweep deliberately matches the sibling pacs.008 / pacs.009 charset
+     * rules so that pain.001 does not <em>weaken</em> the {@code charset-finx-extended-for-name-address}
+     * coverage relative to the authoritative CBPR+ inventory: any Name/Address free-text value, in any
+     * address component, is subject to the same extended-charset constraint. Each value is passed through
+     * {@link #checkText(String, String, List)}, which delegates to
+     * {@link FinXCharset#isValidExtended(String)}; absent (null/empty) values therefore never produce a
+     * finding. {@code getAdrLine()} is a lazily-initialized, never-{@code null} list (its entries may be
+     * {@code null}) and is iterated directly.
+     *
+     * @param addr the postal address to inspect; ignored when {@code null}
+     * @param addrPath the element path prefix for this address (for example
+     *     {@code CstmrCdtTrfInitn/PmtInf[0]/Dbtr/PstlAdr}); the sub-element suffix is appended per checked
+     *     value
+     * @param findings the accumulator to which any findings are appended
+     */
+    private void checkAddress(PostalAddress24 addr, String addrPath, List<Finding> findings) {
+        if (addr == null) {
+            return;
+        }
+        checkText(addr.getDept(), addrPath + "/Dept", findings);
+        checkText(addr.getSubDept(), addrPath + "/SubDept", findings);
+        checkText(addr.getStrtNm(), addrPath + "/StrtNm", findings);
+        checkText(addr.getBldgNb(), addrPath + "/BldgNb", findings);
+        checkText(addr.getBldgNm(), addrPath + "/BldgNm", findings);
+        checkText(addr.getFlr(), addrPath + "/Flr", findings);
+        checkText(addr.getPstBx(), addrPath + "/PstBx", findings);
+        checkText(addr.getRoom(), addrPath + "/Room", findings);
+        checkText(addr.getPstCd(), addrPath + "/PstCd", findings);
+        checkText(addr.getTwnNm(), addrPath + "/TwnNm", findings);
+        checkText(addr.getTwnLctnNm(), addrPath + "/TwnLctnNm", findings);
+        checkText(addr.getDstrctNm(), addrPath + "/DstrctNm", findings);
+        checkText(addr.getCtrySubDvsn(), addrPath + "/CtrySubDvsn", findings);
+        checkText(addr.getCtry(), addrPath + "/Ctry", findings);
+        List<String> adrLines = addr.getAdrLine(); // lazy, never null (entries may be null)
+        for (int k = 0; k < adrLines.size(); k++) {
+            checkText(adrLines.get(k), addrPath + "/AdrLine[" + k + "]", findings);
         }
     }
 

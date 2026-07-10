@@ -46,6 +46,14 @@ import org.junit.jupiter.api.Test;
  *       outside the FIN-X extended set ({@code JOSÉ GARCÍA}) must be flagged.
  * </ol>
  *
+ * <p>Three further negatives prove the full scope of rules&nbsp;2 and&nbsp;5, which cover the
+ * transaction-level ultimate debtor and every free-text postal-address component (not only
+ * {@code Nm}/{@code TwnNm}/{@code AdrLine}): a <em>transaction-level</em> {@code UltmtDbtr} with a
+ * postal address but no {@code Nm} fires {@code party-name-mandatory-when-address-present}; a
+ * transaction-level {@code UltmtDbtr} whose {@code Nm} is non-FIN-X fires
+ * {@code charset-finx-extended-for-name-address}; and a non-{@code Nm} address component
+ * ({@code PstlAdr/StrtNm}) that is non-FIN-X also fires the charset rule.
+ *
  * <p>Rule&nbsp;4 in particular demonstrates that the module <em>reuses</em> the existing header
  * handling rather than reimplementing it: the header is parsed as part of
  * {@link MxPain00100109#parse(String)} and inspected by the rule through {@code getAppHdr()}, so the
@@ -153,6 +161,67 @@ class Pain001ValidationTest {
         assertThat(f).isPresent();
         assertThat(f.get().getSeverity()).isEqualTo(Severity.WARNING);
         assertThat(result.isValid()).isTrue(); // WARNING (R1) does NOT invalidate
+    }
+
+    /**
+     * A <em>transaction-level</em> ultimate debtor ({@code CdtTrfTxInf/UltmtDbtr}) that carries a postal
+     * address but no {@code Nm} must fire the name-mandatory-when-address-present rule as an ERROR,
+     * rendering the message invalid. This proves the rule covers the transaction-level ultimate debtor in
+     * addition to the PaymentInformation-level parties, per the CBPR+ inventory which lists
+     * {@code UltmtDbtr} generally for this rule.
+     */
+    @Test
+    void partyNameMandatoryFiresForTransactionUltimateDebtor() throws IOException {
+        MxPain00100109 mx =
+                MxPain00100109.parse(Lib.readResource("pain001_tx_ultmtdbtr_name_missing_negative.xml"));
+
+        ValidationResult result = new CbprValidator().validate(mx);
+
+        Optional<Finding> f = findingFor(result, "party-name-mandatory-when-address-present");
+        assertThat(f).isPresent();
+        assertThat(f.get().getSeverity()).isEqualTo(Severity.ERROR);
+        assertThat(f.get().getElementPath()).contains("CdtTrfTxInf[0]/UltmtDbtr");
+        assertThat(result.isValid()).isFalse();
+    }
+
+    /**
+     * A <em>transaction-level</em> ultimate debtor ({@code CdtTrfTxInf/UltmtDbtr}) whose {@code Nm} carries
+     * characters outside the FIN-X extended set ({@code JOSÉ GARCÍA}) must fire the charset rule as an
+     * ERROR, rendering the message invalid. This proves the charset rule traverses the transaction-level
+     * ultimate debtor.
+     */
+    @Test
+    void charsetFinxExtendedFiresForTransactionUltimateDebtor() throws IOException {
+        MxPain00100109 mx =
+                MxPain00100109.parse(Lib.readResource("pain001_tx_ultmtdbtr_charset_negative.xml"));
+
+        ValidationResult result = new CbprValidator().validate(mx);
+
+        Optional<Finding> f = findingFor(result, "charset-finx-extended-for-name-address");
+        assertThat(f).isPresent();
+        assertThat(f.get().getSeverity()).isEqualTo(Severity.ERROR);
+        assertThat(f.get().getElementPath()).contains("CdtTrfTxInf[0]/UltmtDbtr");
+        assertThat(result.isValid()).isFalse();
+    }
+
+    /**
+     * A charset violation in a <em>non-{@code Nm}</em> postal address component &mdash; here the debtor's
+     * {@code PstlAdr/StrtNm} ({@code Rue José}) &mdash; must fire the charset rule as an ERROR, rendering
+     * the message invalid. This proves the rule sweeps every free-text address component, not only
+     * {@code Nm}, {@code TwnNm} and {@code AdrLine}.
+     */
+    @Test
+    void charsetFinxExtendedFiresForNonNameAddressComponent() throws IOException {
+        MxPain00100109 mx =
+                MxPain00100109.parse(Lib.readResource("pain001_address_component_charset_negative.xml"));
+
+        ValidationResult result = new CbprValidator().validate(mx);
+
+        Optional<Finding> f = findingFor(result, "charset-finx-extended-for-name-address");
+        assertThat(f).isPresent();
+        assertThat(f.get().getSeverity()).isEqualTo(Severity.ERROR);
+        assertThat(f.get().getElementPath()).contains("PstlAdr/StrtNm");
+        assertThat(result.isValid()).isFalse();
     }
 
     /**
