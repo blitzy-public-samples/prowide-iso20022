@@ -272,32 +272,40 @@ is performed by `CbprValidator` and **never throws** — non-compliance there is
 The MT fixtures below are **implemented** and are parsed through the real MT API against real `Mx*`
 objects; the fixture names match the committed files under `src/test/resources/` exactly. The migration
 **integration tests** named below (`Mt103ToPacs008Test`, `Mt202ToPacs009Test`, `Mt101ToPain001Test`) and
-the `CbprValidator` they exercise are **planned for a later checkpoint** and are **not yet part of this
-deliverable**; the end-to-end verdicts described here are therefore the **intended** behaviour those
-forthcoming tests will assert, not claims about tests that already run.
+the `CbprValidator` they exercise are **delivered in this module**: they compile and pass as part of the
+`iso20022-cbpr` test suite. Each test parses its MT fixture, runs the address-scoped migrator's
+`translate(String)` to obtain a **partial** `Mx*` message, feeds that message back through
+`CbprValidator.validate(...)`, and asserts **specifically on the structured-address finding** (its
+presence or absence, and its severity) rather than on the overall `valid` flag. The end-to-end verdicts
+described below are therefore assertions the tests actually make against the delivered implementation.
 
-- **`mt103_structured.txt`** (implemented fixture) — debtor `:50F:` = `1/JOHN DOE` + `3/GB/LONDON` (no
-  `2/` line → **Structured**); creditor `:59F:` = `1/JANE SMITH` + `2/MAIN AVENUE 22` + `3/US/NEW YORK`
-  (has a `2/` line → **Hybrid**). Migrating this message yields a compliant pacs.008 whose debtor and
-  creditor both pass the hero rule — i.e. **no structured-address finding** — which the planned
-  `Mt103ToPacs008Test` will assert.
-- **`mt103_unstructured.txt`** (implemented fixture) — the **mandated negative migration**: the debtor
-  `:50F:` is structured and passes, but the creditor `:59:` (no option letter) carries free-format
-  address lines (`JANE SMITH` / `123 NOWHERE STREET` / `NEW YORK NY 10001`) that map to an
-  **`AdrLine`-only / fully-unstructured** address, which **FAILS** the hero rule on the creditor. The
-  planned `Mt103ToPacs008Test` will assert specifically on the creditor structured-address finding, not
-  on overall validity.
-- **`mt202.txt`** (implemented fixture) — `:58A:IRVTUS3NXXX` (BIC only, 11 characters). The planned
-  `Mt202ToPacs009Test` will assert that the migrated pacs.009 has **no** structured-address finding for
-  the beneficiary institution (the BIC-exempt path).
-- **`mt101.txt`** (implemented fixture) — Sequence B ordering customer `:50F:` = `1/ROBERT BROWN` +
-  `3/DE/BERLIN` (no `2/` → **Structured**) and beneficiary `:59F:` = `1/MARIA WEBER` + `2/PARK LANE 7` +
-  `3/FR/PARIS` (has a `2/` → **Hybrid**). The planned `Mt101ToPain001Test` will migrate this message and
-  assert a compliant pain.001 — i.e. no structured-address finding on either party.
+- **`mt103_structured.txt`** — debtor `:50F:` = `1/JOHN DOE` + `3/GB/LONDON` (no `2/` line →
+  **Structured**); creditor `:59F:` = `1/JANE SMITH` + `2/MAIN AVENUE 22` + `3/US/NEW YORK` (has a `2/`
+  line → **Hybrid**). `Mt103ToPacs008Test.structuredMt103MigrationPassesHeroRule` migrates this message to
+  a compliant pacs.008 whose debtor and creditor both pass the hero rule and asserts that **no
+  `structured-address-min-town-country` finding** is present.
+- **`mt103_unstructured.txt`** — the **mandated negative migration**: the debtor `:50F:` is structured
+  and passes, but the creditor `:59:` (no option letter) carries free-format address lines (`JANE SMITH` /
+  `123 NOWHERE STREET` / `NEW YORK NY 10001`) that map to an **`AdrLine`-only / fully-unstructured**
+  address, which **FAILS** the hero rule on the creditor.
+  `Mt103ToPacs008Test.unstructuredMt103MigrationFailsHeroRule` asserts that the
+  `structured-address-min-town-country` finding is **present** with `Severity.ERROR` and that its element
+  path identifies the creditor (`Cdtr`); it does not assert on overall validity.
+- **`mt202.txt`** — `:58A:IRVTUS3NXXX` (BIC only, 11 characters).
+  `Mt202ToPacs009Test.bicOnlyMt202MigrationHasNoStructuredAddressFinding` asserts that the migrated
+  pacs.009 has **no** structured-address finding for the beneficiary institution (the BIC-exempt path),
+  and `migratedBicfiIsValidFormat` asserts there is **no `bicfi-format` finding** while confirming — via a
+  deep getter — that the beneficiary `BICFI` was actually mapped as `IRVTUS3NXXX`, so the pass is genuine
+  rather than vacuous.
+- **`mt101.txt`** — Sequence B ordering customer `:50F:` = `1/ROBERT BROWN` + `3/DE/BERLIN` (no `2/` →
+  **Structured**) and beneficiary `:59F:` = `1/MARIA WEBER` + `2/PARK LANE 7` + `3/FR/PARIS` (has a `2/` →
+  **Hybrid**). `Mt101ToPain001Test.mt101SequenceBMigrationPassesHeroRule` migrates this message to a
+  compliant pain.001 and asserts that **no structured-address finding** is present for either party.
 
-When implemented, those tests will use **JUnit 5 + AssertJ** (with **XMLUnit** where XML comparison is
-relevant) and **no mocking**, exercising real MT parsing and real `Mx*` construction throughout —
-consistent with the repository's no-mock testing convention.
+These tests use **JUnit 5 + AssertJ** with **no mocking**, exercising real MT parsing and real `Mx*`
+construction throughout — consistent with the repository's no-mock testing convention. The MT103 and
+MT101 tests each additionally include a `migrationDoesNotThrow` check confirming that `translate(...)`
+completes without throwing for a well-formed MT source.
 
 ## Companion Deliverables
 
