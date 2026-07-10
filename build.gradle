@@ -211,17 +211,18 @@ project(':iso20022-core') {
 
 project(':iso20022-cbpr') {
 	dependencies {
+		// iso20022-core is the API surface (AbstractMX, AppHdrParser, MxNode, BusinessAppHdrV02)
+		// and carries pw-swift-core (AbstractMT, MT103/MT202/MT101) transitively via its own api scope
 		api project(':iso20022-core')
 
+		// message roots + transaction/group types consumed read-only by the validator and migrators.
+		// -mx depends on its -types only at implementation (non-transitive) scope, so declare -types explicitly.
 		implementation project(':model-pacs-mx')
 		implementation project(':model-pacs-types')
 		implementation project(':model-pain-mx')
 		implementation project(':model-pain-types')
-		// model-common-types is added automatically by the shared configure(subprojects.findAll { it.name != 'model-common-types' }) block
-
-		implementation "org.apache.commons:commons-lang3:${commonsLangVersion}"
-		implementation "com.google.code.gson:gson:${gsonVersion}"
-		implementation "com.sun.xml.bind:jaxb-impl:${jaxbVersion}"
+		// NOTE: model-common-types is auto-added by the configure(subprojects.findAll { it.name != 'model-common-types' }) block above.
+		// NOTE: commons-lang3 / gson / jaxb-impl are inherited from the subprojects { } block above.
 
 		testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
 		testImplementation 'org.assertj:assertj-core:3.27.7'
